@@ -80,7 +80,7 @@ export class InstallManager {
         }
 
         // Configure the compose file
-        const composeContent = this.container.defaultCompose;
+        const composeContent = structuredClone(this.container.defaultCompose);
 
         composeContent.services.windows.environment.RAM_SIZE = `${this.conf.ramGB}G`;
         composeContent.services.windows.environment.CPU_CORES = `${this.conf.cpuCores}`;

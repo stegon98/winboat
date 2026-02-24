@@ -7,8 +7,10 @@ import { assert } from "@vueuse/core";
 const { usb, getDeviceList }: typeof import("usb") = require("usb");
 const fs: typeof import("node:fs") = require("node:fs");
 const { execFileSync }: typeof import("node:child_process") = require("node:child_process");
+const process: typeof import("node:process") = require("node:process");
 const remote: typeof import("@electron/remote") = require("@electron/remote");
 const path: typeof import("node:path") = require("node:path");
+const IS_LINUX_HOST = process.platform === "linux";
 
 type LinuxDeviceDatabase = Record<string, { name: string; devices: Record<string, string> }>;
 
@@ -318,6 +320,10 @@ export class USBManager {
     isMTPDevice(device: PTSerializableDeviceInfo): boolean;
     isMTPDevice(device: Device): boolean;
     isMTPDevice(device: PTSerializableDeviceInfo | Device) {
+        if (!IS_LINUX_HOST) {
+            return false;
+        }
+
         const { vendorIdHex, productIdHex } = this.getDeviceVidPidHex(device);
 
         // Check cache first
@@ -378,6 +384,11 @@ export class USBManager {
 
     // TODO: handle hostaddr/hostbus in case of duplicate VID/PID
     async #QMPAddDevice(device: Device) {
+        if (!IS_LINUX_HOST) {
+            logger.warn("USB passthrough is only supported on Linux hosts");
+            return;
+        }
+
         let response = null;
         const vendorid = device.deviceDescriptor.idVendor;
         const productid = device.deviceDescriptor.idProduct;
@@ -478,6 +489,10 @@ function readLinuxDeviceDatabase(): LinuxDeviceDatabase {
  * @returns An object containing the manufacturer and product strings (nulled fields if not found)
  */
 function getDeviceStringsFromLsusb(vidHex: string, pidHex: string): DeviceStrings {
+    if (!IS_LINUX_HOST) {
+        return { manufacturer: null, product: null };
+    }
+
     try {
         // Run lsusb -v for the specific device, suppress stderr
         const lsusbOutput = execFileSync("lsusb", ["-d", `${vidHex}:${pidHex}`, "-v"], { encoding: "utf8" });
@@ -503,6 +518,10 @@ function getDeviceStringsFromLsusb(vidHex: string, pidHex: string): DeviceString
  * @param deviceBus The device bus to free
  */
 function freeMTPDevice(deviceBus: string) {
+    if (!IS_LINUX_HOST) {
+        return;
+    }
+
     try {
         const fuserOutput = execFileSync("fuser", ["-k", deviceBus], { encoding: "utf8" });
         if (fuserOutput.includes(deviceBus)) {

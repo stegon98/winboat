@@ -42,7 +42,7 @@
                     <div v-if="currentStep.id === StepID.WELCOME" class="step-block">
                         <h1 class="text-3xl font-semibold">{{ currentStep.title }}</h1>
                         <p class="text-lg text-gray-400">
-                            WinBoat is a full-fledged app that helps you natively run Windows applications on your Linux
+                            WinBoat is a full-fledged app that helps you natively run Windows applications on your {{ hostOSLabel }}
                             machine with ease.
                         </p>
                         <p class="text-lg text-gray-400">
@@ -91,9 +91,9 @@
                             <li class="flex items-center gap-2">
                                 <span v-if="specs.kvmEnabled" class="text-green-500">✔</span>
                                 <span v-else class="text-red-500">✘</span>
-                                Virtualization (KVM) enabled
+                                {{ virtualizationLabel }}
                                 <a
-                                    href="https://duckduckgo.com/?t=h_&q=how+to+enable+virtualization+in+%3Cmotherboard+brand%3E+bios&ia=web"
+                                    :href="virtualizationHelpURL"
                                     @click="openAnchorLink"
                                     target="_blank"
                                     class="text-violet-400 hover:underline ml-1"
@@ -113,7 +113,7 @@
                                     >
                                         <x-menu>
                                             <x-menuitem
-                                                v-for="(runtime, key) in Object.values(ContainerRuntimes)"
+                                                v-for="(runtime, key) in availableContainerRuntimes"
                                                 :key="key"
                                                 :value="runtime"
                                                 :toggled="runtime === containerRuntime"
@@ -125,7 +125,7 @@
                                 </div>
                                 installed
                                 <a
-                                    href="https://docs.docker.com/engine/install/"
+                                    :href="containerInstallGuideURL(containerRuntime)"
                                     @click="openAnchorLink"
                                     target="_blank"
                                     class="text-violet-400 hover:underline ml-1"
@@ -148,7 +148,7 @@
                                     <span v-else class="text-red-500">✘</span>
                                     Docker Compose v2 installed
                                     <a
-                                        href="https://docs.docker.com/compose/install/#plugin-linux-only"
+                                        :href="dockerComposeGuideURL"
                                         @click="openAnchorLink"
                                         target="_blank"
                                         class="text-violet-400 hover:underline ml-1"
@@ -156,7 +156,7 @@
                                     >
                                 </li>
 
-                                <li class="flex items-center gap-2">
+                                <li v-if="isLinuxHost" class="flex items-center gap-2">
                                     <span
                                         v-if="
                                             containerSpecs &&
@@ -190,10 +190,10 @@
                                         >✔</span
                                     >
                                     <span v-else class="text-red-500">✘</span>
-                                    Docker daemon is running
-                                    <span class="text-gray-600"> (Also enable on boot) </span>
+                                    Docker engine is running
+                                    <span class="text-gray-600"> (Also enable auto-start) </span>
                                     <a
-                                        href="https://docs.docker.com/config/daemon/start/"
+                                        :href="dockerDaemonGuideURL"
                                         @click="openAnchorLink"
                                         target="_blank"
                                         class="text-violet-400 hover:underline ml-1"
@@ -217,7 +217,7 @@
                                     <span v-else class="text-red-500">✘</span>
                                     Podman Compose installed
                                     <a
-                                        href="https://github.com/containers/podman-compose?tab=readme-ov-file#installation"
+                                        :href="podmanComposeGuideURL"
                                         @click="openAnchorLink"
                                         target="_blank"
                                         class="text-violet-400 hover:underline ml-1"
@@ -230,7 +230,7 @@
                                 <span v-else class="text-red-500">✘</span>
                                 FreeRDP 3.x.x installed
                                 <a
-                                    href="https://github.com/FreeRDP/FreeRDP/wiki/PreBuilds"
+                                    :href="freeRDPInstallGuideURL"
                                     @click="openAnchorLink"
                                     target="_blank"
                                     class="text-violet-400 hover:underline ml-1"
@@ -506,7 +506,7 @@
                     <div v-if="currentStep.id === StepID.HARDWARE_CONFIG" class="step-block">
                         <h1 class="text-3xl font-semibold">{{ currentStep.title }}</h1>
                         <p class="text-lg text-gray-400">
-                            WinBoat utilizes a containerized KVM virtual machine to run Windows applications. Please
+                            WinBoat utilizes a containerized virtual machine to run Windows applications. Please
                             configure the hardware settings for the virtual machine.
                         </p>
 
@@ -611,12 +611,12 @@
                     <div v-if="currentStep.id === StepID.SHOULD_SHARE_HOME_FOLDER" class="step-block">
                         <h1 class="text-3xl font-semibold">Folder Sharing</h1>
                         <p class="text-lg text-gray-400">
-                            WinBoat allows you to share a folder from your Linux system with the Windows virtual machine.
+                            WinBoat allows you to share a folder from your {{ hostOSLabel }} system with the Windows virtual machine.
                             You can choose whether to enable this feature and select which folder to share.
                         </p>
                         <p class="text-lg text-gray-400">
                             <b>⚠️ WARNING:</b>
-                            Sharing a folder exposes your Linux files to Windows-specific malware and viruses.
+                            Sharing a folder exposes your {{ hostOSLabel }} files to Windows-specific malware and viruses.
                             Only enable this feature if you understand the risks involved. Always be careful with the
                             files you download and open in Windows.
                         </p>
@@ -814,7 +814,7 @@ import { useRouter } from "vue-router";
 import { computedAsync } from "@vueuse/core";
 import { InstallConfiguration, Specs } from "../../types";
 import { getSpecs, getMemoryInfo, defaultSpecs, satisfiesPrequisites, type MemoryInfo } from "../lib/specs";
-import { WINDOWS_VERSIONS, WINDOWS_LANGUAGES, type WindowsVersionKey } from "../lib/constants";
+import { getHostOSLabel, IS_LINUX, WINDOWS_LANGUAGES, WINDOWS_VERSIONS, type WindowsVersionKey } from "../lib/constants";
 import { InstallManager, InstallStates } from "../lib/install";
 import { openAnchorLink } from "../utils/openLink";
 import license from "../assets/LICENSE.txt?raw";
@@ -822,6 +822,7 @@ import {
     ContainerRuntimes,
     DockerSpecs,
     PodmanSpecs,
+    getSupportedContainerRuntimes,
     getContainerSpecs,
 } from "../lib/containers/common";
 import { WinboatConfig } from "../lib/config";
@@ -913,6 +914,31 @@ const steps: Step[] = [
 const MIN_CPU_CORES = 1;
 const MIN_RAM_GB = 2;
 const MIN_DISK_GB = 32;
+const isLinuxHost = IS_LINUX;
+const hostOSLabel = getHostOSLabel();
+const availableContainerRuntimes = getSupportedContainerRuntimes();
+const virtualizationHelpURL = isLinuxHost
+    ? "https://duckduckgo.com/?t=h_&q=how+to+enable+virtualization+in+%3Cmotherboard+brand%3E+bios&ia=web"
+    : "https://support.apple.com/guide/security/virtualization-security-sec7f7da5f4/web";
+const virtualizationLabel = isLinuxHost ? "Virtualization (KVM) enabled" : "Virtualization (Hypervisor) enabled";
+const containerInstallGuideURL = (runtime: ContainerRuntimes) => {
+    if (runtime === ContainerRuntimes.PODMAN) {
+        return "https://podman.io/docs/installation";
+    }
+
+    return isLinuxHost ? "https://docs.docker.com/engine/install/" : "https://docs.docker.com/desktop/setup/install/mac-install/";
+};
+const podmanComposeGuideURL = "https://github.com/containers/podman-compose?tab=readme-ov-file#installation";
+const dockerComposeGuideURL = isLinuxHost
+    ? "https://docs.docker.com/compose/install/#plugin-linux-only"
+    : "https://docs.docker.com/compose/install/";
+const dockerDaemonGuideURL = isLinuxHost
+    ? "https://docs.docker.com/config/daemon/start/"
+    : "https://docs.docker.com/desktop/setup/install/mac-install/";
+const freeRDPInstallGuideURL = isLinuxHost
+    ? "https://github.com/FreeRDP/FreeRDP/wiki/PreBuilds"
+    : "https://formulae.brew.sh/formula/freerdp";
+
 const $router = useRouter();
 const specs = ref<Specs>({ ...defaultSpecs });
 const currentStepIdx = ref(0);
@@ -934,7 +960,7 @@ const folderSharing = ref(false);
 const sharedFolderPath = ref("");
 const installState = ref<InstallStates>(InstallStates.IDLE);
 const preinstallMsg = ref("");
-const containerRuntime = ref(ContainerRuntimes.DOCKER);
+const containerRuntime = ref<ContainerRuntimes>(availableContainerRuntimes[0] ?? ContainerRuntimes.DOCKER);
 const vncPort = ref(8006);
 // These are the install steps where the container is actually up and running
 const linkableInstallSteps = [ InstallStates.MONITORING_PREINSTALL, InstallStates.INSTALLING_WINDOWS, InstallStates.COMPLETED ];
@@ -942,6 +968,13 @@ const linkableInstallSteps = [ InstallStates.MONITORING_PREINSTALL, InstallState
 let installManager: InstallManager | null;
 
 onMounted(async () => {
+    const wbConfig = WinboatConfig.getInstance();
+    if (availableContainerRuntimes.includes(wbConfig.config.containerRuntime)) {
+        containerRuntime.value = wbConfig.config.containerRuntime;
+    } else {
+        wbConfig.config.containerRuntime = containerRuntime.value;
+    }
+
     specs.value = await getSpecs();
     console.log("Specs", specs.value);
 

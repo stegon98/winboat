@@ -5,6 +5,7 @@ import { type Winboat } from "./renderer/lib/winboat";
 export type Specs = {
     cpuCores: number;
     ramGB: number;
+    // On Linux this represents /dev/kvm availability, on macOS the hypervisor backend
     kvmEnabled: boolean;
     freeRDP3Installed: boolean;
 };
@@ -62,6 +63,7 @@ export type ComposeConfig = {
     services: {
         windows: {
             image: string;
+            platform?: string;
             container_name: string;
             environment: {
                 VERSION: WindowsVersionKey;

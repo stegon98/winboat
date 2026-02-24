@@ -1,9 +1,11 @@
 import { getFreeRDP } from "../utils/getFreeRDP";
 import { ContainerSpecs } from "./containers/common";
 const fs: typeof import("fs") = require("node:fs");
-const { exec }: typeof import("child_process") = require("node:child_process");
+const os: typeof import("node:os") = require("node:os");
+const process: typeof import("node:process") = require("node:process");
+const { execFile }: typeof import("child_process") = require("node:child_process");
 const { promisify }: typeof import("util") = require("node:util");
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export function satisfiesPrequisites(specs: Specs, containerSpecs?: ContainerSpecs) {
     return (
@@ -23,34 +25,58 @@ export const defaultSpecs: Specs = {
     freeRDP3Installed: false,
 };
 
+function roundBytesToGB(bytes: number): number {
+    return Math.round((bytes / 1024 / 1024 / 1024) * 100) / 100;
+}
+
+function getAvailableCpuCores(): number {
+    if ("availableParallelism" in os && typeof os.availableParallelism === "function") {
+        return os.availableParallelism();
+    }
+
+    return os.cpus().length;
+}
+
+async function hasVirtualizationBackendSupport(): Promise<boolean> {
+    if (process.platform === "linux") {
+        return fs.existsSync("/dev/kvm");
+    }
+
+    if (process.platform === "darwin") {
+        try {
+            const { stdout } = await execFileAsync("sysctl", ["-n", "kern.hv_support"]);
+            return stdout.trim() === "1";
+        } catch (e) {
+            console.error("Error checking macOS hypervisor support, falling back to architecture check:", e);
+            return process.arch === "arm64";
+        }
+    }
+
+    return false;
+}
+
 export async function getSpecs() {
     const specs: Specs = { ...defaultSpecs };
 
-    // Physical CPU cores check
+    // CPU cores check
     try {
-        const res = (await execAsync('lscpu -p | egrep -v "^#" | sort -u -t, -k 2,4 | wc -l')).stdout;
-        specs.cpuCores = Number.parseInt(res.trim(), 10);
+        specs.cpuCores = getAvailableCpuCores();
     } catch (e) {
         console.error("Error getting CPU cores:", e);
     }
 
-    // TODO: These commands might silently fail
-    // But if they do, it means something wasn't right to begin with
     try {
         const memoryInfo = await getMemoryInfo();
         specs.ramGB = memoryInfo.totalGB;
     } catch (e) {
-        console.error("Error reading /proc/meminfo:", e);
+        console.error("Error getting memory info:", e);
     }
 
-    // KVM check
+    // Virtualization backend check (/dev/kvm on Linux, Hypervisor Framework on macOS)
     try {
-        const cpuInfo = fs.readFileSync("/proc/cpuinfo", "utf8");
-        if ((cpuInfo.includes("vmx") || cpuInfo.includes("svm")) && fs.existsSync("/dev/kvm")) {
-            specs.kvmEnabled = true;
-        }
+        specs.kvmEnabled = await hasVirtualizationBackendSupport();
     } catch (e) {
-        console.error("Error reading /proc/cpuinfo or checking /dev/kvm:", e);
+        console.error("Error checking virtualization backend:", e);
     }
 
     // FreeRDP 3.x.x check (including Flatpak)
@@ -71,26 +97,8 @@ export type MemoryInfo = {
 };
 
 export async function getMemoryInfo() {
-    try {
-        const memoryInfo: MemoryInfo = {
-            totalGB: 0,
-            availableGB: 0,
-        };
-        const memInfo = fs.readFileSync("/proc/meminfo", "utf8");
-        const totalMemLine = memInfo.split("\n").find(line => line.startsWith("MemTotal"));
-        const availableMemLine = memInfo.split("\n").find(line => line.startsWith("MemAvailable"));
-        if (totalMemLine) {
-            memoryInfo.totalGB = Math.round((Number.parseInt(totalMemLine.split(/\s+/)[1]) / 1024 / 1024) * 100) / 100;
-        }
-
-        if (availableMemLine) {
-            memoryInfo.availableGB =
-                Math.round((Number.parseInt(availableMemLine.split(/\s+/)[1]) / 1024 / 1024) * 100) / 100;
-        }
-
-        return memoryInfo;
-    } catch (e) {
-        console.error("Error reading /proc/meminfo:", e);
-        throw e;
-    }
+    return {
+        totalGB: roundBytesToGB(os.totalmem()),
+        availableGB: roundBytesToGB(os.freemem()),
+    };
 }

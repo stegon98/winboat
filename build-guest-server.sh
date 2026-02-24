@@ -26,10 +26,19 @@ cd guest_server
 # Verify nssm.exe integrity
 echo "Verifying nssm.exe integrity..."
 if [ -f "nssm.exe" ] && [ -f "nssm.sha1.txt" ]; then
-    COMPUTED_HASH=$(sha1sum nssm.exe | cut -d' ' -f1)
+    if command -v sha1sum >/dev/null 2>&1; then
+        COMPUTED_HASH=$(sha1sum nssm.exe | cut -d' ' -f1)
+    elif command -v shasum >/dev/null 2>&1; then
+        COMPUTED_HASH=$(shasum -a 1 nssm.exe | cut -d' ' -f1)
+    else
+        echo "Warning: no SHA-1 tool found (sha1sum/shasum), skipping integrity check"
+        COMPUTED_HASH=""
+    fi
     EXPECTED_HASH=$(cat nssm.sha1.txt | tr -d '[:space:]')
     
-    if [ "$COMPUTED_HASH" = "$EXPECTED_HASH" ]; then
+    if [ -z "$COMPUTED_HASH" ]; then
+        echo "Integrity check skipped because no SHA-1 tool is available"
+    elif [ "$COMPUTED_HASH" = "$EXPECTED_HASH" ]; then
         echo "✓ nssm.exe integrity verified (SHA-1: $COMPUTED_HASH)"
     else
         echo "✗ nssm.exe integrity check FAILED!"

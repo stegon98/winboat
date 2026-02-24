@@ -1,4 +1,5 @@
 import { execFileAsync, stringifyExecFile } from "../lib/exec-helper";
+const process: typeof import("process") = require("node:process");
 
 export class FreeRDPInstallation {
     file: string;
@@ -21,18 +22,30 @@ export class FreeRDPInstallation {
     }
 }
 
-const freeRDPInstallations = [
-    new FreeRDPInstallation("xfreerdp3"),
-    new FreeRDPInstallation("xfreerdp"),
-    new FreeRDPInstallation("flatpak", ["run", "--command=xfreerdp", "com.freerdp.FreeRDP"]),
-];
+function getFreeRDPInstallations() {
+    const defaultInstallations = [new FreeRDPInstallation("xfreerdp3"), new FreeRDPInstallation("xfreerdp")];
+
+    if (process.platform === "darwin") {
+        return [
+            new FreeRDPInstallation("/opt/homebrew/bin/xfreerdp"),
+            new FreeRDPInstallation("/usr/local/bin/xfreerdp"),
+            ...defaultInstallations,
+        ];
+    }
+
+    return [
+        ...defaultInstallations,
+        // Flatpak support is Linux specific
+        new FreeRDPInstallation("flatpak", ["run", "--command=xfreerdp", "com.freerdp.FreeRDP"]),
+    ];
+}
 
 /**
  * Returns the correct FreeRDP 3.x.x command available on the system or null
  */
 export async function getFreeRDP() {
     const VERSION_3_STRING = "version 3.";
-    for (let installation of freeRDPInstallations) {
+    for (let installation of getFreeRDPInstallations()) {
         try {
             const shellOutput = await installation.exec(["--version"]);
             if (shellOutput.stdout.includes(VERSION_3_STRING)) {

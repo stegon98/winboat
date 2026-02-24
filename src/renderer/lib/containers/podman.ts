@@ -1,5 +1,5 @@
 import { ComposeConfig } from "../../../types";
-import { PODMAN_DEFAULT_COMPOSE } from "../../data/podman";
+import { createDefaultPodmanCompose } from "../../data/podman";
 import { WINBOAT_DIR } from "../constants";
 import {
     ComposeArguments,
@@ -47,7 +47,7 @@ type PodmanInfo = {
 const COMPOSE_ENV_VARS = { PODMAN_COMPOSE_PROVIDER: "podman-compose", PODMAN_COMPOSE_WARNING_LOGS: "false" };
 
 export class PodmanContainer extends ContainerManager {
-    defaultCompose = PODMAN_DEFAULT_COMPOSE;
+    defaultCompose = createDefaultPodmanCompose();
     composeFilePath = path.join(WINBOAT_DIR, "podman-compose.yml");
     executableAlias = "podman";
 

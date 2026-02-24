@@ -1,9 +1,33 @@
 const os: typeof import("os") = require("node:os");
 const path: typeof import("path") = require("node:path");
+const process: typeof import("process") = require("node:process");
+
+export const IS_LINUX = process.platform === "linux";
+export const IS_MACOS = process.platform === "darwin";
+export const IS_APPLE_SILICON = IS_MACOS && process.arch === "arm64";
 
 // Should be {home}/.winboat
 export const WINBOAT_DIR = path.join(os.homedir(), ".winboat");
 export const DEFAULT_HOMEBREW_DIR = path.join(os.homedir(), "../linuxbrew/.linuxbrew/bin");
+
+export function getDefaultExtraPathEntries(): string[] {
+    if (IS_LINUX) {
+        return [DEFAULT_HOMEBREW_DIR];
+    }
+
+    if (IS_MACOS) {
+        return ["/opt/homebrew/bin", "/usr/local/bin"];
+    }
+
+    return [];
+}
+
+export function getHostOSLabel(): string {
+    if (IS_LINUX) return "Linux";
+    if (IS_MACOS) return "macOS";
+
+    return process.platform;
+}
 
 export const WINDOWS_VERSIONS = {
     "11": "Windows 11 Pro",

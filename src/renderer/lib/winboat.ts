@@ -20,7 +20,13 @@ import { assert } from "@vueuse/core";
 import { setIntervalImmediately } from "../utils/interval";
 import { ExecFileAsyncError } from "./exec-helper";
 import { ContainerManager, ContainerStatus } from "./containers/container";
-import { CommonPorts, ContainerRuntimes, createContainer, getActiveHostPort } from "./containers/common";
+import {
+    CommonPorts,
+    ContainerRuntimes,
+    createContainer,
+    getActiveHostPort,
+    getSupportedContainerRuntimes,
+} from "./containers/common";
 
 const nodeFetch: typeof import("node-fetch").default = require("node-fetch");
 const fs: typeof import("fs") = require("node:fs");
@@ -262,6 +268,16 @@ export class Winboat {
 
     private constructor() {
         this.#wbConfig = WinboatConfig.getInstance();
+
+        const configuredRuntime = this.#wbConfig.config.containerRuntime;
+        const supportedRuntimes = getSupportedContainerRuntimes();
+
+        if (!supportedRuntimes.includes(configuredRuntime)) {
+            const fallbackRuntime = supportedRuntimes[0] ?? ContainerRuntimes.DOCKER;
+            logger.warn(`Container runtime '${configuredRuntime}' is not supported on this host, using '${fallbackRuntime}'`);
+            this.#wbConfig.config.containerRuntime = fallbackRuntime;
+        }
+
         this.containerMgr = createContainer(this.#wbConfig.config.containerRuntime);
 
         // This is a special interval which will never be destroyed

@@ -2,6 +2,7 @@ import { PortEntryProtocol } from "../../../types";
 import { ContainerManager } from "./container";
 import { DockerContainer, DockerSpecs } from "./docker";
 import { PodmanContainer, PodmanSpecs } from "./podman";
+const process: typeof import("node:process") = require("node:process");
 
 // For convenience
 export { type DockerSpecs } from "./docker";
@@ -11,6 +12,15 @@ export { ContainerStatus } from "./container";
 export enum ContainerRuntimes {
     DOCKER = "Docker",
     PODMAN = "Podman",
+}
+
+export function getSupportedContainerRuntimes(): ContainerRuntimes[] {
+    // Podman Desktop/Machine support on macOS is not officially supported in WinBoat yet.
+    if (process.platform === "darwin") {
+        return [ContainerRuntimes.DOCKER];
+    }
+
+    return Object.values(ContainerRuntimes) as ContainerRuntimes[];
 }
 
 // NOTE: These are container port values, and should be used as such

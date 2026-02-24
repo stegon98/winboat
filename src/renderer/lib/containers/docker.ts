@@ -1,8 +1,8 @@
 import { ComposeConfig } from "../../../types";
-import { DOCKER_DEFAULT_COMPOSE } from "../../data/docker";
+import { createDefaultDockerCompose } from "../../data/docker";
 import { capitalizeFirstLetter } from "../../utils/capitalize";
 import { ComposePortEntry } from "../../utils/port";
-import { WINBOAT_DIR } from "../constants";
+import { IS_LINUX, WINBOAT_DIR } from "../constants";
 import {
     ComposeArguments,
     ComposeDirection,
@@ -25,7 +25,7 @@ export type DockerSpecs = {
 };
 
 export class DockerContainer extends ContainerManager {
-    defaultCompose = DOCKER_DEFAULT_COMPOSE;
+    defaultCompose = createDefaultDockerCompose();
     composeFilePath = path.join(WINBOAT_DIR, "docker-compose.yml"); // TODO: If/when we support multiple VM's we need to put this in the constructor
     executableAlias = "docker";
 
@@ -194,11 +194,16 @@ export class DockerContainer extends ContainerManager {
         }
 
         // Docker user group check
-        try {
-            const { stdout: userGroups } = await execFileAsync("id", ["-Gn"]);
-            specs.dockerIsInUserGroups = userGroups.split(/\s+/).includes("docker");
-        } catch (e) {
-            console.error("Error checking user groups for docker:", e);
+        if (IS_LINUX) {
+            try {
+                const { stdout: userGroups } = await execFileAsync("id", ["-Gn"]);
+                specs.dockerIsInUserGroups = userGroups.split(/\s+/).includes("docker");
+            } catch (e) {
+                console.error("Error checking user groups for docker:", e);
+            }
+        } else {
+            // docker group membership is Linux-specific
+            specs.dockerIsInUserGroups = true;
         }
 
         return specs;

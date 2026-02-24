@@ -20,6 +20,11 @@
         "category": "Utility",
         "artifactName": "${name}-${version}-${arch}.${ext}"
     },
+    "mac": {
+        "target": ["dmg", "zip"],
+        "category": "public.app-category.utilities",
+        "artifactName": "${name}-${version}-mac-${arch}.${ext}"
+    },
     "files": [
         {
             "from": "build/main",

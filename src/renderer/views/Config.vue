@@ -120,7 +120,17 @@
                             </h1>
                         </div>
 
-                        <template v-if="usbPassthroughDisabled || isUpdatingUSBPrerequisites">
+                        <template v-if="!isLinuxHost">
+                            <x-card
+                                class="flex items-center py-2 w-full my-2 backdrop-blur-xl gap-4 backdrop-brightness-150 bg-yellow-200/10"
+                            >
+                                <Icon class="inline-flex text-yellow-500 size-8" icon="clarity:warning-solid"></Icon>
+                                <h1 class="my-0 text-base font-normal text-yellow-200">
+                                    USB Passthrough is currently supported only on Linux hosts.
+                                </h1>
+                            </x-card>
+                        </template>
+                        <template v-else-if="usbPassthroughDisabled || isUpdatingUSBPrerequisites">
                             <x-card
                                 class="flex items-center py-2 w-full my-2 backdrop-blur-xl gap-4 backdrop-brightness-150 bg-yellow-200/10"
                             >
@@ -145,7 +155,7 @@
                                 </x-button>
                             </x-card>
                         </template>
-                        <template v-if="wbConfig.config.containerRuntime === ContainerRuntimes.PODMAN">
+                        <template v-if="isLinuxHost && wbConfig.config.containerRuntime === ContainerRuntimes.PODMAN">
                             <x-card
                                 class="flex items-center py-2 w-full my-2 backdrop-blur-xl gap-4 backdrop-brightness-150 bg-yellow-200/10"
                             >
@@ -157,6 +167,7 @@
                         </template>
                         <template
                             v-if="
+                                isLinuxHost &&
                                 !usbPassthroughDisabled &&
                                 !isUpdatingUSBPrerequisites &&
                                 wbConfig.config.containerRuntime === ContainerRuntimes.DOCKER
@@ -472,6 +483,7 @@ import {
     RESTART_NO,
     GUEST_RDP_PORT,
     GUEST_QMP_PORT,
+    IS_LINUX,
 } from "../lib/constants";
 import { ComposePortEntry, ComposePortMapper, Range } from "../utils/port";
 const { app }: typeof import("@electron/remote") = require("@electron/remote");
@@ -511,6 +523,7 @@ let portMapper = ref<ComposePortMapper | null>(null);
 const wbConfig = reactive(WinboatConfig.getInstance());
 const winboat = Winboat.getInstance();
 const usbManager = USBManager.getInstance();
+const isLinuxHost = IS_LINUX;
 
 // Constants
 const USB_BUS_PATH = "/dev/bus/usb:/dev/bus/usb";
@@ -631,6 +644,10 @@ function selectSharedFolder() {
  * to the Compose file if they don't already exist
  */
 async function addRequiredComposeFieldsUSB() {
+    if (!isLinuxHost) {
+        return;
+    }
+
     if (!usbPassthroughDisabled.value) {
         return;
     }
