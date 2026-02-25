@@ -1,5 +1,5 @@
 import { ComposeConfig } from "../../types";
-import { IS_APPLE_SILICON, IS_LINUX, RESTART_ON_FAILURE } from "../lib/constants";
+import { IS_APPLE_SILICON, IS_LINUX, IS_MACOS, RESTART_ON_FAILURE } from "../lib/constants";
 
 export function createDefaultPodmanCompose(): ComposeConfig {
     const devices: string[] = [];
@@ -31,6 +31,7 @@ export function createDefaultPodmanCompose(): ComposeConfig {
                     USER_PORTS: "7148",
                     HOST_PORTS: "7149",
                     ARGUMENTS: "-qmp tcp:0.0.0.0:7149,server,wait=off",
+                    ...(IS_MACOS ? { KVM: "N" } : {}),
                 },
                 cap_add: ["NET_ADMIN"],
                 ports: [
