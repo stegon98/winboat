@@ -21,6 +21,7 @@
         "artifactName": "${name}-${version}-${arch}.${ext}"
     },
     "mac": {
+        "icon": "icons/winboat_logo.png",
         "target": ["dmg", "zip"],
         "category": "public.app-category.utilities",
         "artifactName": "${name}-${version}-mac-${arch}.${ext}"
