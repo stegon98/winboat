@@ -1,5 +1,6 @@
 import { getFreeRDP } from "../utils/getFreeRDP";
-import { ContainerSpecs } from "./containers/common";
+import { RuntimeSpecs } from "./runtimes/common";
+import type { RuntimeCapabilities } from "./runtimes/capabilities";
 const fs: typeof import("fs") = require("node:fs");
 const os: typeof import("node:os") = require("node:os");
 const process: typeof import("node:process") = require("node:process");
@@ -7,15 +8,43 @@ const { execFile }: typeof import("child_process") = require("node:child_process
 const { promisify }: typeof import("util") = require("node:util");
 const execFileAsync = promisify(execFile);
 
-export function satisfiesPrequisites(specs: Specs, containerSpecs?: ContainerSpecs) {
-    return (
-        containerSpecs &&
-        Object.values(containerSpecs).every(x => x) &&
+export function satisfiesPrequisites(
+    specs: Specs,
+    containerSpecs?: RuntimeSpecs,
+    runtimeCapabilities?: RuntimeCapabilities,
+) {
+    const hasBaseSpecs =
         specs.freeRDP3Installed &&
         specs.kvmEnabled &&
         specs.ramGB >= 4 &&
-        specs.cpuCores >= 2
-    );
+        specs.cpuCores >= 2;
+
+    if (!hasBaseSpecs || !containerSpecs) {
+        return false;
+    }
+
+    if (runtimeCapabilities && !runtimeCapabilities.supportsGuidedInstall) {
+        return false;
+    }
+
+    if ("dockerInstalled" in containerSpecs) {
+        return (
+            containerSpecs.dockerInstalled &&
+            containerSpecs.dockerComposeInstalled &&
+            containerSpecs.dockerIsRunning &&
+            containerSpecs.dockerIsInUserGroups
+        );
+    }
+
+    if ("podmanInstalled" in containerSpecs) {
+        return containerSpecs.podmanInstalled && containerSpecs.podmanComposeInstalled;
+    }
+
+    if ("qemuInstalled" in containerSpecs) {
+        return containerSpecs.qemuInstalled && containerSpecs.qemuImgInstalled && containerSpecs.hvfSupported;
+    }
+
+    return false;
 }
 
 export const defaultSpecs: Specs = {

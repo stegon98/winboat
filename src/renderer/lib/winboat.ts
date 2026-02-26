@@ -3,6 +3,7 @@ import { WINBOAT_DIR } from "./constants";
 import type {
     ComposeConfig,
     CustomAppCallbacks,
+    GuestArchitecture,
     GuestServerUpdateResponse,
     GuestServerVersion,
     Metrics,
@@ -19,14 +20,16 @@ import { QMPManager } from "./qmp";
 import { assert } from "@vueuse/core";
 import { setIntervalImmediately } from "../utils/interval";
 import { ExecFileAsyncError } from "./exec-helper";
-import { ContainerManager, ContainerStatus } from "./containers/container";
 import {
     CommonPorts,
-    ContainerRuntimes,
-    createContainer,
+    RuntimeKinds,
+    RuntimeStatus,
+    createRuntime,
     getActiveHostPort,
-    getSupportedContainerRuntimes,
-} from "./containers/common";
+    getPreferredGuestArchitecture,
+    getSupportedRuntimeKinds,
+} from "./runtimes/common";
+import { type RuntimeManager } from "./runtimes/runtime";
 
 const nodeFetch: typeof import("node-fetch").default = require("node-fetch");
 const fs: typeof import("fs") = require("node:fs");
@@ -106,6 +109,22 @@ const customAppCallbacks: CustomAppCallbacks = {
 
 const QMP_WAIT_MS = 2000;
 const FETCH_TIMEOUT = 1000;
+
+function normalizeGuestArchitectureToken(archToken: string | undefined): GuestArchitecture | null {
+    if (!archToken) {
+        return null;
+    }
+
+    const normalized = archToken.trim().toLowerCase();
+    if (normalized === "amd64" || normalized === "x86_64" || normalized === "x64") {
+        return "amd64";
+    }
+    if (normalized === "arm64" || normalized === "aarch64") {
+        return "arm64";
+    }
+
+    return null;
+}
 
 class AppManager {
     appCache: WinApp[] = [];
@@ -237,7 +256,7 @@ export class Winboat {
     // Variables
     isOnline: Ref<boolean> = ref(false);
     isUpdatingGuestServer: Ref<boolean> = ref(false);
-    containerStatus: Ref<ContainerStatus> = ref(ContainerStatus.EXITED);
+    containerStatus: Ref<RuntimeStatus> = ref(RuntimeStatus.EXITED);
     containerActionLoading: Ref<boolean> = ref(false);
     rdpConnected: Ref<boolean> = ref(false);
     metrics: Ref<Metrics> = ref<Metrics>({
@@ -259,7 +278,7 @@ export class Winboat {
     readonly #wbConfig: WinboatConfig | null = null;
     appMgr: AppManager | null = null;
     qmpMgr: QMPManager | null = null;
-    containerMgr: ContainerManager | null = null;
+    containerMgr: RuntimeManager | null = null;
 
     static getInstance() {
         Winboat.instance ??= new Winboat();
@@ -270,15 +289,15 @@ export class Winboat {
         this.#wbConfig = WinboatConfig.getInstance();
 
         const configuredRuntime = this.#wbConfig.config.containerRuntime;
-        const supportedRuntimes = getSupportedContainerRuntimes();
+        const supportedRuntimes = getSupportedRuntimeKinds();
 
         if (!supportedRuntimes.includes(configuredRuntime)) {
-            const fallbackRuntime = supportedRuntimes[0] ?? ContainerRuntimes.DOCKER;
+            const fallbackRuntime = supportedRuntimes[0] ?? RuntimeKinds.DOCKER;
             logger.warn(`Container runtime '${configuredRuntime}' is not supported on this host, using '${fallbackRuntime}'`);
             this.#wbConfig.config.containerRuntime = fallbackRuntime;
         }
 
-        this.containerMgr = createContainer(this.#wbConfig.config.containerRuntime);
+        this.containerMgr = createRuntime(this.#wbConfig.config.containerRuntime);
 
         // This is a special interval which will never be destroyed
         setInterval(async () => {
@@ -288,7 +307,7 @@ export class Winboat {
                 this.containerStatus.value = _containerStatus;
                 logger.info(`Winboat Container state changed to ${_containerStatus}`);
 
-                if (_containerStatus === ContainerStatus.RUNNING) {
+                if (_containerStatus === RuntimeStatus.RUNNING) {
                     await this.containerMgr!.port(); // Cache active port mappings
                     await this.createAPIIntervals();
                 } else {
@@ -562,7 +581,7 @@ export class Winboat {
         const composeFilePath = this.containerMgr!.composeFilePath;
 
         // 0. Stop the current container if it's online
-        if (this.containerStatus.value === ContainerStatus.RUNNING) {
+        if (this.containerStatus.value === RuntimeStatus.RUNNING) {
             await this.stopContainer();
         }
 
@@ -610,8 +629,8 @@ export class Winboat {
         const compose = Winboat.readCompose(this.containerMgr!.composeFilePath);
         const storage = compose.services.windows.volumes.find(vol => vol.includes("/storage"));
         if (storage?.startsWith("data:")) {
-            if (this.#wbConfig?.config.containerRuntime !== ContainerRuntimes.DOCKER) {
-                logger.error("Volume not supported on podman runtime");
+            if (this.#wbConfig?.config.containerRuntime !== RuntimeKinds.DOCKER) {
+                logger.error("Volume cleanup via docker volume is only supported on the Docker runtime");
             }
             // In this case we have a volume (legacy)
             await execAsync("docker volume rm winboat_data");
@@ -726,23 +745,59 @@ export class Winboat {
         const version = (await versionRes.json()) as GuestServerVersion;
 
         const appVersion = import.meta.env.VITE_APP_VERSION;
+        const runtimeKind = this.#wbConfig?.config.containerRuntime ?? RuntimeKinds.DOCKER;
+        const configuredGuestArch = this.#wbConfig?.config.guestArch ?? getPreferredGuestArchitecture(runtimeKind);
+        const reportedGuestArch = normalizeGuestArchitectureToken(version.guest_arch);
+        const shouldUpdateForVersion = version.version !== appVersion;
+        const shouldUpdateForArch = reportedGuestArch
+            ? reportedGuestArch !== configuredGuestArch
+            : configuredGuestArch === "arm64";
 
-        if (version.version !== appVersion) {
+        if (shouldUpdateForVersion) {
             logger.info(`New local version of WinBoat Guest Server found: ${appVersion}`);
             logger.info(`Current version of WinBoat Guest Server: ${version.version}`);
         }
 
-        // 2. Return early if the version is the same
-        if (version.version === appVersion) {
+        logger.info(`Configured guest architecture: ${configuredGuestArch}`);
+        logger.info(`Reported guest architecture: ${version.guest_arch ?? "unknown"}`);
+
+        if (shouldUpdateForArch) {
+            logger.info(
+                `Guest server architecture update required (configured: ${configuredGuestArch}, reported: ${
+                    version.guest_arch ?? "unknown"
+                })`,
+            );
+        }
+
+        // 2. Return early if the guest server already matches version and architecture requirements
+        if (!shouldUpdateForVersion && !shouldUpdateForArch) {
             return;
         }
 
         // 3. Set update flag & grab winboat_guest_server.zip from Electron assets
         this.isUpdatingGuestServer.value = true;
-        const zipPath = remote.app.isPackaged
-            ? path.join(process.resourcesPath, "guest_server", "winboat_guest_server.zip")
-            : path.join(remote.app.getAppPath(), "..", "..", "guest_server", "winboat_guest_server.zip");
+        const guestServerBasePath = remote.app.isPackaged
+            ? path.join(process.resourcesPath, "guest_server")
+            : path.join(remote.app.getAppPath(), "..", "..", "guest_server");
+        const guestArch = configuredGuestArch;
+        const zipCandidates = [
+            path.join(guestServerBasePath, "dist", guestArch, "winboat_guest_server.zip"),
+            path.join(guestServerBasePath, "dist", `windows-${guestArch}`, "winboat_guest_server.zip"),
+            path.join(guestServerBasePath, "dist", `winboat_guest_server_${guestArch}.zip"),
+        ];
+        if (guestArch === "amd64") {
+            zipCandidates.push(path.join(guestServerBasePath, "winboat_guest_server.zip")); // legacy fallback
+        }
+        const zipPath = zipCandidates.find(candidate => fs.existsSync(candidate));
 
+        if (!zipPath) {
+            this.isUpdatingGuestServer.value = false;
+            throw new Error(
+                `Could not locate guest server zip for guestArch='${guestArch}'. Checked: ${zipCandidates.join(", ")}`,
+            );
+        }
+
+        logger.info("Guest architecture", guestArch);
         logger.info("ZIP Path", zipPath);
 
         // 4. Send the payload to the guest server

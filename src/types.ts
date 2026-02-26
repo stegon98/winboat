@@ -1,5 +1,5 @@
 import { type WindowsVersionKey } from "./renderer/lib/constants";
-import { ContainerRuntimes } from "./renderer/lib/containers/common";
+import { type RuntimeKind } from "./renderer/lib/runtimes/common";
 import { type Winboat } from "./renderer/lib/winboat";
 
 export type Specs = {
@@ -10,6 +10,8 @@ export type Specs = {
     freeRDP3Installed: boolean;
 };
 
+export type GuestArchitecture = "amd64" | "arm64";
+
 export type InstallConfiguration = {
     windowsVersion: WindowsVersionKey;
     windowsLanguage: string;
@@ -19,9 +21,10 @@ export type InstallConfiguration = {
     diskSpaceGB: number;
     username: string;
     password: string;
+    guestArch: GuestArchitecture;
     customIsoPath?: string;
     sharedFolderPath?: string;
-    container: ContainerRuntimes;
+    container: RuntimeKind;
 };
 
 export type WinApp = {
@@ -111,6 +114,7 @@ export type GuestServerVersion = {
     version: string;
     commit_hash: string;
     build_time: string;
+    guest_arch?: string;
 };
 
 export type GuestServerUpdateResponse = {

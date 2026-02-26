@@ -59,6 +59,7 @@ jobs:
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   ELECTRON_BUILDER_COMPRESSION_LEVEL: 5
+                  WINBOAT_EXPERIMENTAL_MAC_NATIVE_RUNTIME: "0"
             - name: Derive artifact naming
               id: meta
               shell: bash
@@ -111,7 +112,10 @@ jobs:
               uses: actions/upload-artifact@v4
               with:
                   name: ${{ steps.meta.outputs.NAME }}-${{ steps.meta.outputs.VERSION }}-${{ steps.meta.outputs.ARCH }}-guest_server.zip
-                  path: dist/linux-unpacked/resources/guest_server/winboat_guest_server.zip
+                  path: |
+                      dist/linux-unpacked/resources/guest_server/winboat_guest_server.zip
+                      dist/linux-unpacked/resources/guest_server/dist/winboat_guest_server_amd64.zip
+                      dist/linux-unpacked/resources/guest_server/dist/winboat_guest_server_arm64.zip
                   if-no-files-found: ignore
             # - name: Upload metadata
             #   uses: actions/upload-artifact@v4
@@ -182,6 +186,7 @@ jobs:
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   ELECTRON_BUILDER_COMPRESSION_LEVEL: 5
+                  WINBOAT_EXPERIMENTAL_MAC_NATIVE_RUNTIME: "0"
             - name: Zip unpacked variant
               run: cd dist && zip -r winboat-linux-unpacked.zip linux-unpacked/
             - name: Create GitHub Release
@@ -195,6 +200,8 @@ jobs:
                       dist/winboat-linux-unpacked.zip
                       dist/latest-linux.yml
                       dist/linux-unpacked/resources/guest_server/winboat_guest_server.zip
+                      dist/linux-unpacked/resources/guest_server/dist/winboat_guest_server_amd64.zip
+                      dist/linux-unpacked/resources/guest_server/dist/winboat_guest_server_arm64.zip
                   draft: false
                   prerelease: false
                   generate_release_notes: true

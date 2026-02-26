@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -77,6 +78,7 @@ func getVersion(w http.ResponseWriter, r *http.Request) {
 		"version":     Version,
 		"commit_hash": CommitHash,
 		"build_time":  BuildTimestamp,
+		"guest_arch":  runtime.GOARCH,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

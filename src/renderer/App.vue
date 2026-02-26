@@ -56,7 +56,8 @@
                             >
                                 https://github.com/TibixDev/winboat/releases
                             </a>
-                            , you should pick version <strong>{{ appVer }}</strong>
+                            , you should pick version <strong>{{ appVer }}</strong> and asset
+                            <strong>{{ guestServerAssetName }}</strong>
                         </li>
                         <li>Navigate to <code>C:\Program Files\WinBoat</code> and delete the contents</li>
                         <li>Extract the freshly downloaded zip into the same folder</li>
@@ -164,7 +165,7 @@ import { Winboat } from "./lib/winboat";
 import { openAnchorLink } from "./utils/openLink";
 import { WinboatConfig } from "./lib/config";
 import { USBManager } from "./lib/usbmanager";
-import { CommonPorts, getActiveHostPort } from "./lib/containers/common";
+import { CommonPorts, getActiveHostPort } from "./lib/runtimes/common";
 import { performAutoMigrations } from "./lib/migrate";
 const { BrowserWindow }: typeof import("@electron/remote") = require("@electron/remote");
 const os: typeof import("os") = require("node:os");
@@ -183,6 +184,7 @@ const updateDialog = useTemplateRef("updateDialog");
 const novncURL = ref("");
 
 const animationsDisabled = computed(() => wbConfig?.config.disableAnimations);
+const guestServerAssetName = computed(() => `winboat_guest_server_${wbConfig?.config.guestArch ?? "amd64"}.zip`);
 
 onMounted(async () => {
     const winboatInstalled = await isInstalled();

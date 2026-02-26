@@ -203,7 +203,7 @@
                             </template>
 
                             <!-- Podman Specific Requirements -->
-                            <template v-else>
+                            <template v-else-if="containerRuntime == ContainerRuntimes.PODMAN">
                                 <li class="flex items-center gap-2">
                                     <span
                                         v-if="
@@ -225,6 +225,68 @@
                                     >
                                 </li>
                             </template>
+
+                            <!-- QEMU Native Specific Requirements -->
+                            <template v-else-if="containerRuntime == ContainerRuntimes.QEMU_NATIVE">
+                                <li class="flex items-center gap-2">
+                                    <span
+                                        v-if="
+                                            containerSpecs &&
+                                            'qemuInstalled' in containerSpecs &&
+                                            containerSpecs.qemuInstalled
+                                        "
+                                        class="text-green-500"
+                                        >âœ”</span
+                                    >
+                                    <span v-else class="text-red-500">âœ˜</span>
+                                    QEMU installed
+                                    <a
+                                        :href="qemuInstallGuideURL"
+                                        @click="openAnchorLink"
+                                        target="_blank"
+                                        class="text-violet-400 hover:underline ml-1"
+                                        >How?</a
+                                    >
+                                </li>
+
+                                <li class="flex items-center gap-2">
+                                    <span
+                                        v-if="
+                                            containerSpecs &&
+                                            'qemuImgInstalled' in containerSpecs &&
+                                            containerSpecs.qemuImgInstalled
+                                        "
+                                        class="text-green-500"
+                                        >âœ”</span
+                                    >
+                                    <span v-else class="text-red-500">âœ˜</span>
+                                    qemu-img installed
+                                </li>
+
+                                <li class="flex items-center gap-2">
+                                    <span
+                                        v-if="
+                                            containerSpecs &&
+                                            'hvfSupported' in containerSpecs &&
+                                            containerSpecs.hvfSupported
+                                        "
+                                        class="text-green-500"
+                                        >âœ”</span
+                                    >
+                                    <span v-else class="text-red-500">âœ˜</span>
+                                    Hypervisor Framework (HVF) available
+                                </li>
+
+                                <li v-if="runtimeCapabilities.guidedInstallReason" class="text-sm text-yellow-300">
+                                    {{ runtimeCapabilities.guidedInstallReason }}
+                                </li>
+                            </template>
+                            <li
+                                v-if="runtimeCapabilities.runtime === containerRuntime && runtimeCapabilities.unsupportedReason"
+                                class="text-sm text-yellow-300"
+                            >
+                                {{ runtimeCapabilities.unsupportedReason }}
+                            </li>
                             <li class="flex items-center gap-2">
                                 <span v-if="specs.freeRDP3Installed" class="text-green-500">✔</span>
                                 <span v-else class="text-red-500">✘</span>
@@ -245,7 +307,7 @@
                                 toggled
                                 class="px-6"
                                 @click="currentStepIdx++"
-                                :disabled="!satisfiesPrequisites(specs, containerSpecs)"
+                                :disabled="!prerequisitesSatisfied"
                             >
                                 Next
                             </x-button>
@@ -681,6 +743,10 @@
                                     <span class="text-base text-white">{{ containerRuntime }}</span>
                                 </div>
                                 <div class="flex flex-col">
+                                    <span class="text-sm text-gray-400">Guest Architecture</span>
+                                    <span class="text-base text-white">{{ guestArch }}</span>
+                                </div>
+                                <div class="flex flex-col">
                                     <span class="text-sm text-gray-400">Language</span>
                                     <span class="text-base text-white">{{ windowsLanguage }}</span>
                                 </div>
@@ -814,7 +880,7 @@ import { useRouter } from "vue-router";
 import { computedAsync } from "@vueuse/core";
 import { InstallConfiguration, Specs } from "../../types";
 import { getSpecs, getMemoryInfo, defaultSpecs, satisfiesPrequisites, type MemoryInfo } from "../lib/specs";
-import { getHostOSLabel, IS_LINUX, WINDOWS_LANGUAGES, WINDOWS_VERSIONS, type WindowsVersionKey } from "../lib/constants";
+import { getHostOSLabel, WINDOWS_LANGUAGES, WINDOWS_VERSIONS, type WindowsVersionKey } from "../lib/constants";
 import { InstallManager, InstallStates } from "../lib/install";
 import { openAnchorLink } from "../utils/openLink";
 import license from "../assets/LICENSE.txt?raw";
@@ -822,9 +888,12 @@ import {
     ContainerRuntimes,
     DockerSpecs,
     PodmanSpecs,
+    QemuNativeSpecs,
+    getPreferredGuestArchitecture,
     getSupportedContainerRuntimes,
     getContainerSpecs,
-} from "../lib/containers/common";
+} from "../lib/runtimes/common";
+import { getHostProfile, getRuntimeCapabilities } from "../lib/runtimes/capabilities";
 import { WinboatConfig } from "../lib/config";
 
 const path: typeof import("path") = require("node:path");
@@ -914,30 +983,18 @@ const steps: Step[] = [
 const MIN_CPU_CORES = 1;
 const MIN_RAM_GB = 2;
 const MIN_DISK_GB = 32;
-const isLinuxHost = IS_LINUX;
+const hostProfile = getHostProfile();
+const isLinuxHost = hostProfile.isLinux;
 const hostOSLabel = getHostOSLabel();
 const availableContainerRuntimes = getSupportedContainerRuntimes();
-const virtualizationHelpURL = isLinuxHost
-    ? "https://duckduckgo.com/?t=h_&q=how+to+enable+virtualization+in+%3Cmotherboard+brand%3E+bios&ia=web"
-    : "https://support.apple.com/guide/security/virtualization-security-sec7f7da5f4/web";
-const virtualizationLabel = isLinuxHost ? "Virtualization (KVM) enabled" : "Virtualization (Hypervisor) enabled";
-const containerInstallGuideURL = (runtime: ContainerRuntimes) => {
-    if (runtime === ContainerRuntimes.PODMAN) {
-        return "https://podman.io/docs/installation";
-    }
-
-    return isLinuxHost ? "https://docs.docker.com/engine/install/" : "https://docs.docker.com/desktop/setup/install/mac-install/";
-};
-const podmanComposeGuideURL = "https://github.com/containers/podman-compose?tab=readme-ov-file#installation";
-const dockerComposeGuideURL = isLinuxHost
-    ? "https://docs.docker.com/compose/install/#plugin-linux-only"
-    : "https://docs.docker.com/compose/install/";
-const dockerDaemonGuideURL = isLinuxHost
-    ? "https://docs.docker.com/config/daemon/start/"
-    : "https://docs.docker.com/desktop/setup/install/mac-install/";
-const freeRDPInstallGuideURL = isLinuxHost
-    ? "https://github.com/FreeRDP/FreeRDP/wiki/PreBuilds"
-    : "https://formulae.brew.sh/formula/freerdp";
+const virtualizationHelpURL = hostProfile.virtualizationHelpURL;
+const virtualizationLabel = hostProfile.virtualizationLabel;
+const containerInstallGuideURL = (runtime: ContainerRuntimes) => getRuntimeCapabilities(runtime, hostProfile).installGuideURL;
+const podmanComposeGuideURL = hostProfile.podmanComposeGuideURL;
+const qemuInstallGuideURL = hostProfile.qemuInstallGuideURL;
+const dockerComposeGuideURL = hostProfile.dockerComposeGuideURL;
+const dockerDaemonGuideURL = hostProfile.dockerDaemonGuideURL;
+const freeRDPInstallGuideURL = hostProfile.freeRDPInstallGuideURL;
 
 const $router = useRouter();
 const specs = ref<Specs>({ ...defaultSpecs });
@@ -961,9 +1018,11 @@ const sharedFolderPath = ref("");
 const installState = ref<InstallStates>(InstallStates.IDLE);
 const preinstallMsg = ref("");
 const containerRuntime = ref<ContainerRuntimes>(availableContainerRuntimes[0] ?? ContainerRuntimes.DOCKER);
+const guestArch = ref(getPreferredGuestArchitecture(containerRuntime.value));
 const vncPort = ref(8006);
 // These are the install steps where the container is actually up and running
 const linkableInstallSteps = [ InstallStates.MONITORING_PREINSTALL, InstallStates.INSTALLING_WINDOWS, InstallStates.COMPLETED ];
+const runtimeCapabilities = computed(() => getRuntimeCapabilities(containerRuntime.value, hostProfile));
 
 let installManager: InstallManager | null;
 
@@ -974,6 +1033,7 @@ onMounted(async () => {
     } else {
         wbConfig.config.containerRuntime = containerRuntime.value;
     }
+    guestArch.value = getPreferredGuestArchitecture(containerRuntime.value);
 
     specs.value = await getSpecs();
     console.log("Specs", specs.value);
@@ -1004,14 +1064,23 @@ watch(folderSharing, (newValue) => {
     }
 });
 
+watch(containerRuntime, newRuntime => {
+    guestArch.value = getPreferredGuestArchitecture(newRuntime);
+});
+
 const containerSpecs = computedAsync(async () => {
     return await getContainerSpecs(containerRuntime.value);
 });
 
-function containerInstalled(containerSpecs: DockerSpecs | PodmanSpecs | undefined) {
+const prerequisitesSatisfied = computed(() =>
+    satisfiesPrequisites(specs.value, containerSpecs.value, runtimeCapabilities.value),
+);
+
+function containerInstalled(containerSpecs: DockerSpecs | PodmanSpecs | QemuNativeSpecs | undefined) {
     if (!containerSpecs) return false;
     if ("dockerInstalled" in containerSpecs) return containerSpecs.dockerInstalled;
     if ("podmanInstalled" in containerSpecs) return containerSpecs.podmanInstalled;
+    if ("qemuInstalled" in containerSpecs) return containerSpecs.qemuInstalled && containerSpecs.qemuImgInstalled;
     return false;
 }
 
@@ -1163,13 +1232,15 @@ function install() {
         diskSpaceGB: diskSpaceGB.value,
         username: username.value,
         password: password.value,
+        guestArch: guestArch.value,
         sharedFolderPath: folderSharing.value ? sharedFolderPath.value : undefined,
         ...(customIsoPath.value ? { customIsoPath: customIsoPath.value } : {}),
-        container: containerRuntime.value, // Hardcdde for now
+        container: containerRuntime.value,
     };
 
     const wbConfig = WinboatConfig.getInstance(); // Create winboat config.
     wbConfig.config.containerRuntime = containerRuntime.value; // Save which runtime to use.
+    wbConfig.config.guestArch = guestArch.value; // Save guest architecture for asset/update selection.
 
     installManager = new InstallManager(installConfig);
 

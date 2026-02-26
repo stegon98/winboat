@@ -62,12 +62,22 @@
 
                 <!-- Auto Start Container -->
                 <ConfigCard
+                    v-if="runtimeCapabilities.supportsAutoStart"
                     icon="clarity:power-solid"
                     title="Auto Start Container"
                     desc="If enabled, the Windows container will automatically be started when the system boots up"
                     type="switch"
                     v-model:value="autoStartContainer"
                 />
+                <x-card
+                    v-else
+                    class="flex items-center py-2 px-3 w-full my-0 backdrop-blur-xl gap-4 backdrop-brightness-150 bg-yellow-200/10"
+                >
+                    <Icon class="inline-flex text-yellow-500 size-8" icon="clarity:warning-solid"></Icon>
+                    <h1 class="my-0 text-base font-normal text-yellow-200">
+                        {{ runtimeCapabilities.autoStartReason || "Auto-start is not available for this runtime." }}
+                    </h1>
+                </x-card>
 
                 <!-- FreeRDP Port -->
                 <ConfigCard
@@ -120,13 +130,16 @@
                             </h1>
                         </div>
 
-                        <template v-if="!isLinuxHost">
+                        <template v-if="!runtimeCapabilities.supportsUsbPassthrough">
                             <x-card
                                 class="flex items-center py-2 w-full my-2 backdrop-blur-xl gap-4 backdrop-brightness-150 bg-yellow-200/10"
                             >
                                 <Icon class="inline-flex text-yellow-500 size-8" icon="clarity:warning-solid"></Icon>
                                 <h1 class="my-0 text-base font-normal text-yellow-200">
-                                    USB Passthrough is currently supported only on Linux hosts.
+                                    {{
+                                        runtimeCapabilities.usbPassthroughReason ||
+                                        "USB passthrough is not available for the selected runtime."
+                                    }}
                                 </h1>
                             </x-card>
                         </template>
@@ -155,22 +168,11 @@
                                 </x-button>
                             </x-card>
                         </template>
-                        <template v-if="isLinuxHost && wbConfig.config.containerRuntime === ContainerRuntimes.PODMAN">
-                            <x-card
-                                class="flex items-center py-2 w-full my-2 backdrop-blur-xl gap-4 backdrop-brightness-150 bg-yellow-200/10"
-                            >
-                                <Icon class="inline-flex text-yellow-500 size-8" icon="clarity:warning-solid"></Icon>
-                                <h1 class="my-0 text-base font-normal text-yellow-200">
-                                    USB Passthrough is not yet supported while using Podman as the container runtime.
-                                </h1>
-                            </x-card>
-                        </template>
                         <template
                             v-if="
-                                isLinuxHost &&
+                                runtimeCapabilities.supportsUsbPassthrough &&
                                 !usbPassthroughDisabled &&
-                                !isUpdatingUSBPrerequisites &&
-                                wbConfig.config.containerRuntime === ContainerRuntimes.DOCKER
+                                !isUpdatingUSBPrerequisites
                             "
                         >
                             <x-label
@@ -470,11 +472,12 @@ import ConfigCard from "../components/ConfigCard.vue";
 import { computed, onMounted, ref, watch, reactive } from "vue";
 import { computedAsync } from "@vueuse/core";
 import { Winboat } from "../lib/winboat";
-import { ContainerRuntimes, ContainerStatus } from "../lib/containers/common";
+import { ContainerStatus } from "../lib/runtimes/common";
+import { getRuntimeCapabilities } from "../lib/runtimes/capabilities";
 import type { ComposeConfig } from "../../types";
 import { getSpecs } from "../lib/specs";
 import { Icon } from "@iconify/vue";
-import { MultiMonitorMode, RdpArg, WinboatConfig } from "../lib/config";
+import { MultiMonitorMode, WinboatConfig } from "../lib/config";
 import { USBManager, type PTSerializableDeviceInfo } from "../lib/usbmanager";
 import { type Device } from "usb";
 import {
@@ -483,7 +486,6 @@ import {
     RESTART_NO,
     GUEST_RDP_PORT,
     GUEST_QMP_PORT,
-    IS_LINUX,
 } from "../lib/constants";
 import { ComposePortEntry, ComposePortMapper, Range } from "../utils/port";
 const { app }: typeof import("@electron/remote") = require("@electron/remote");
@@ -523,7 +525,7 @@ let portMapper = ref<ComposePortMapper | null>(null);
 const wbConfig = reactive(WinboatConfig.getInstance());
 const winboat = Winboat.getInstance();
 const usbManager = USBManager.getInstance();
-const isLinuxHost = IS_LINUX;
+const runtimeCapabilities = computed(() => getRuntimeCapabilities(wbConfig.config.containerRuntime));
 
 // Constants
 const USB_BUS_PATH = "/dev/bus/usb:/dev/bus/usb";
@@ -561,7 +563,9 @@ async function assignValues() {
     origShareFolder.value = shareFolder.value;
     origSharedFolderPath.value = sharedFolderPath.value;
 
-    autoStartContainer.value = compose.value.services.windows.restart === RESTART_ON_FAILURE;
+    autoStartContainer.value =
+        runtimeCapabilities.value.supportsAutoStart &&
+        compose.value.services.windows.restart === RESTART_ON_FAILURE;
     origAutoStartContainer.value = autoStartContainer.value;
 
     freerdpPort.value = (portMapper.value.getShortPortMapping(GUEST_RDP_PORT)?.host as number) ?? GUEST_RDP_PORT;
@@ -596,7 +600,11 @@ async function saveCompose() {
         compose.value!.services.windows.volumes.push(volumeStr);
     }
 
-    compose.value!.services.windows.restart = autoStartContainer.value ? RESTART_ON_FAILURE : RESTART_NO;
+    compose.value!.services.windows.restart = runtimeCapabilities.value.supportsAutoStart
+        ? autoStartContainer.value
+            ? RESTART_ON_FAILURE
+            : RESTART_NO
+        : RESTART_NO;
 
     portMapper.value!.setShortPortMapping(GUEST_RDP_PORT, freerdpPort.value, {
         protocol: "tcp",
@@ -644,7 +652,7 @@ function selectSharedFolder() {
  * to the Compose file if they don't already exist
  */
 async function addRequiredComposeFieldsUSB() {
-    if (!isLinuxHost) {
+    if (!runtimeCapabilities.value.supportsUsbPassthrough) {
         return;
     }
 

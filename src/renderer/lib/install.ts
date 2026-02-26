@@ -3,9 +3,10 @@ import { WINBOAT_DIR } from "./constants";
 import { createLogger } from "../utils/log";
 import { createNanoEvents, type Emitter } from "nanoevents";
 import { Winboat } from "./winboat";
-import { ContainerManager } from "./containers/container";
 import { WinboatConfig } from "./config";
-import { CommonPorts, createContainer, getActiveHostPort } from "./containers/common";
+import { CommonPorts, createRuntime, getActiveHostPort } from "./runtimes/common";
+import { getRuntimeCapabilities } from "./runtimes/capabilities";
+import type { RuntimeManager } from "./runtimes/runtime";
 
 const fs: typeof import("fs") = require("fs");
 const path: typeof import("path") = require("path");
@@ -37,14 +38,14 @@ export class InstallManager {
     emitter: Emitter<InstallEvents>;
     state: InstallStates;
     preinstallMsg: string;
-    container: ContainerManager;
+    container: RuntimeManager;
 
     constructor(conf: InstallConfiguration) {
         this.conf = conf;
         this.state = InstallStates.IDLE;
         this.preinstallMsg = "";
         this.emitter = createNanoEvents<InstallEvents>();
-        this.container = createContainer(conf.container);
+        this.container = createRuntime(conf.container);
     }
 
     changeState(newState: InstallStates) {
@@ -134,6 +135,7 @@ export class InstallManager {
     async createOEMAssets() {
         this.changeState(InstallStates.CREATING_OEM);
         logger.info("Creating OEM assets");
+        logger.info(`Selected guest architecture: ${this.conf.guestArch}`);
 
         const oemPath = path.join(WINBOAT_DIR, "oem"); // Fixed the path separator
 
@@ -148,14 +150,28 @@ export class InstallManager {
             ? path.join(process.resourcesPath, "guest_server") // For packaged app
             : path.join(remote.app.getAppPath(), "..", "..", "guest_server"); // For dev mode
 
+        const guestServerPayloadCandidates = [
+            path.join(appPath, "dist", this.conf.guestArch),
+            path.join(appPath, "dist", `windows-${this.conf.guestArch}`),
+        ];
+        if (this.conf.guestArch === "amd64") {
+            guestServerPayloadCandidates.push(appPath); // legacy layout fallback for existing amd64 builds
+        }
+
+        const guestServerPayloadPath = guestServerPayloadCandidates.find(candidate => {
+            return fs.existsSync(path.join(candidate, "winboat_guest_server.exe")) && fs.existsSync(path.join(candidate, "install.bat"));
+        });
+
         logger.info(`Guest server source path: ${appPath}`);
+        logger.info(`Guest server payload candidates: ${JSON.stringify(guestServerPayloadCandidates, null, 2)}`);
 
         // Check if the source directory exists
-        if (!fs.existsSync(appPath)) {
-            const error = new Error(`Guest server directory not found at: ${appPath}`);
+        if (!guestServerPayloadPath || !fs.existsSync(guestServerPayloadPath)) {
+            const error = new Error(`Guest server payload not found for arch '${this.conf.guestArch}'`);
             logger.error(error.message);
             throw error;
         }
+        logger.info(`Guest server payload selected: ${guestServerPayloadPath}`);
 
         const copyRecursive = (src: string, dest: string) => {
             const stats = fs.statSync(src);
@@ -181,10 +197,10 @@ export class InstallManager {
             }
         };
 
-        // Copy all files from guest_server to oemPath
+        // Copy all files from the selected guest server payload to oemPath
         try {
-            fs.readdirSync(appPath).forEach(entry => {
-                const srcPath = path.join(appPath, entry);
+            fs.readdirSync(guestServerPayloadPath).forEach(entry => {
+                const srcPath = path.join(guestServerPayloadPath, entry);
                 const destPath = path.join(oemPath, entry);
                 copyRecursive(srcPath, destPath);
             });
@@ -310,6 +326,14 @@ export class InstallManager {
         logger.info("Starting installation...");
 
         try {
+            const runtimeCapabilities = getRuntimeCapabilities(this.conf.container);
+            if (!runtimeCapabilities.supportsGuidedInstall) {
+                throw new Error(
+                    runtimeCapabilities.guidedInstallReason ??
+                        `Guided installation is not available for runtime '${this.conf.container}'.`,
+                );
+            }
+
             await this.createComposeFile();
             await this.createOEMAssets();
             await this.startContainer();
@@ -333,7 +357,7 @@ export async function isInstalled(): Promise<boolean> {
 
     if (!config) return false;
 
-    const containerRuntime = createContainer(config.containerRuntime);
+    const containerRuntime = createRuntime(config.containerRuntime);
 
     return await containerRuntime.exists();
 }

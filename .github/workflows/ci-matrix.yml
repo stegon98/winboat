@@ -1,0 +1,87 @@
+name: CI Matrix
+
+permissions:
+    contents: read
+
+on:
+    push:
+        branches:
+            - main
+    pull_request:
+        branches:
+            - main
+    workflow_dispatch:
+
+jobs:
+    build-matrix:
+        name: ${{ matrix.job_name }}
+        runs-on: ${{ matrix.os }}
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - job_name: Linux Packaging
+                      os: ubuntu-22.04
+                      build_script: build:linux-gs
+                      feature_flag_mac_native: "0"
+                      artifact_glob: |
+                          dist/*.AppImage
+                          dist/*.deb
+                          dist/*.rpm
+                          dist/*.tar.bz2
+                          dist/linux-unpacked/**
+                    - job_name: macOS ARM64 Packaging
+                      os: macos-14
+                      build_script: build:mac-arm64-gs
+                      feature_flag_mac_native: "1"
+                      artifact_glob: |
+                          dist/*.dmg
+                          dist/*.zip
+                          dist/mac-arm64/**
+        env:
+            WINBOAT_EXPERIMENTAL_MAC_NATIVE_RUNTIME: ${{ matrix.feature_flag_mac_native }}
+            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            ELECTRON_BUILDER_COMPRESSION_LEVEL: 5
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v5
+
+            - name: Update USB IDs database
+              shell: bash
+              run: |
+                  rm -f data/usb.ids
+                  curl -L -o data/usb.ids http://www.linux-usb.org/usb.ids
+
+            - name: Install Linux system dependencies
+              if: startsWith(matrix.os, 'ubuntu')
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y libudev-dev libusb-1.0-0-dev
+
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@v2
+
+            - name: Set up Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version: "stable"
+                  cache-dependency-path: "guest_server/go.sum"
+
+            - name: Install dependencies
+              run: bun ci
+
+            - name: Validate macOS native runtime feature flag gate
+              if: startsWith(matrix.os, 'macos')
+              run: |
+                  bun -e "const m=await import('./src/renderer/lib/containers/common.ts'); process.env.WINBOAT_EXPERIMENTAL_MAC_NATIVE_RUNTIME='1'; const enabled=m.getSupportedContainerRuntimes().includes(m.ContainerRuntimes.QEMU_NATIVE); process.env.WINBOAT_EXPERIMENTAL_MAC_NATIVE_RUNTIME='0'; const disabled=!m.getSupportedContainerRuntimes().includes(m.ContainerRuntimes.QEMU_NATIVE); if (!enabled || !disabled) { throw new Error('Feature flag gate validation failed'); } console.log('Feature flag gate validation passed');"
+
+            - name: Build app
+              run: bun run ${{ matrix.build_script }}
+
+            - name: Upload build artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ${{ github.event.repository.name }}-${{ matrix.os }}-${{ github.sha }}
+                  path: ${{ matrix.artifact_glob }}
+                  if-no-files-found: ignore
+
